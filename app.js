@@ -1,3 +1,7 @@
+'use strict';
+// Export the component
+export default GitHubLinkGenerator;
+
 const GitHubLinkGenerator = () => {
   const [accessToken, setAccessToken] = React.useState('');
   const [scriptLink, setScriptLink] = React.useState('');
@@ -190,6 +194,3 @@ const handleGenerate = () => {
     </div>
   );
 };
-
-// Render the component to the DOM
-ReactDOM.render(<GitHubLinkGenerator />, document.getElementById('root'));
