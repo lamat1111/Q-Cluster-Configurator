@@ -4,16 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Q Cluster Configurator</title>
-    <script crossorigin src="https://unpkg.com/react@17/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
     <script crossorigin integrity="sha384-YF0qbrX3+TW1N8tPl6fzTvqm3kWXt6FnJ5yk3vPxEF/9jY6kvL+WUXdXaiBz7lN" src="https://unpkg.com/react@17/umd/react.development.js"></script>
     <script crossorigin integrity="sha384-vP6UB3Cso7l3fF+5Q9Qom5gjQQ1mxwLKi0hm+kI0ZUXs4gQHKxyAQqClx4ckhOS" src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone@7.22.9/babel.min.js"></script>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
+
+const { useState, useRef } = React;
+
 const ClusterConfigGenerator = () => {
   const [nodeCount, setNodeCount] = useState(1);
   const [nodes, setNodes] = useState([{ name: '', workers: 1 }]);
