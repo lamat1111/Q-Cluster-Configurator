@@ -14,203 +14,351 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        // Paste your entire app.js code here
+const ClusterConfigGenerator = () => {
+  const [nodeCount, setNodeCount] = useState(1);
+  const [nodes, setNodes] = useState([{ name: '', workers: 1 }]);
+  const [selectFeedback, setSelectFeedback] = useState('');
+  const [useDNS, setUseDNS] = useState(false);
+  const [setupUFW, setSetupUFW] = useState(false);
+  const [masterIP, setMasterIP] = useState('');
+  const configRef = useRef(null);
+  const ufwConfigRef = useRef(null);
+  const workersRangeRef = useRef(null);
 
-const GitHubLinkGenerator = () => {
-  const [accessToken, setAccessToken] = React.useState('');
-  const [scriptLink, setScriptLink] = React.useState('');
-  const [localFolder, setLocalFolder] = React.useState('scripts');
-  const [runImmediately, setRunImmediately] = React.useState(true);
-  const [runLocally, setRunLocally] = React.useState(true);
-  const [generatedLink, setGeneratedLink] = React.useState('');
-  const [downloadTool, setDownloadTool] = React.useState('curl');
+  const handleNodeCountChange = (e) => {
+    const count = parseInt(e.target.value, 10);
+    setNodeCount(count);
+    setNodes(prevNodes => {
+      const newNodes = [...prevNodes];
+      if (count > prevNodes.length) {
+        for (let i = prevNodes.length; i < count; i++) {
+          newNodes.push({ name: '', workers: 1 });
+        }
+      } else {
+        newNodes.splice(count);
+      }
+      return newNodes;
+    });
+  };
 
-const handleGenerate = () => {
-  let rawScriptLink = scriptLink;
-  if (!scriptLink.startsWith('http')) {
-    // If it's not a full URL, assume it's a GitHub path
-    const parts = scriptLink.split('/');
-    if (parts.length > 2) {
-      // If there are more than 2 parts, insert 'main' after the second part
-      parts.splice(2, 0, 'main');
-    }
-    rawScriptLink = `https://raw.githubusercontent.com/${parts.join('/')}`;
-  } else if (scriptLink.includes('github.com')) {
-    // If it's a full GitHub URL, replace 'github.com' with 'raw.githubusercontent.com'
-    // and remove '/blob/' if present
-    rawScriptLink = scriptLink
-      .replace('github.com', 'raw.githubusercontent.com')
-      .replace('/blob/', '/');
+  // Add these with your other state variables at the top
+  const [savedConfigs, setSavedConfigs] = useState(() => {
+  const saved = localStorage.getItem('clusterConfigs');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [configName, setConfigName] = useState('');
+
+  const handleNodeChange = (index, field, value) => {
+    setNodes(prevNodes => {
+      const newNodes = [...prevNodes];
+      newNodes[index] = { ...newNodes[index], [field]: value };
+      return newNodes;
+    });
+  };
+
+  const generateConfig = () => {
+    let config = '  dataWorkerMultiaddrs:';
+    let portCounter = 40001;
+    nodes.forEach((node, index) => {
+      if (node.name && node.workers > 0) {
+        config += `\n  # Node ${index + 1}${index === 0 ? ' - Master' : ''}`;
+        for (let i = 0; i < node.workers; i++) {
+          config += '\n' + (useDNS 
+            ? `  - /dns/${node.name}/tcp/${portCounter}`
+            : `  - /ip4/${node.name}/tcp/${portCounter}`);
+          portCounter++;
+        }
+      }
+    });
+    return config;
+  };
+
+  const generateUFWRules = () => {
+    let rules = '';
+    let portCounter = 40001;
+    nodes.forEach((node, index) => {
+      if (index > 0 && node.name && node.workers > 0) {
+        const startPort = portCounter;
+        const endPort = portCounter + node.workers - 1;
+        rules += `# On Node ${index + 1}\n`;
+        rules += `sudo ufw allow from ${masterIP} to any port ${startPort}:${endPort} proto tcp\n`;
+        portCounter += node.workers;
+      } else {
+        portCounter += node.workers;
+      }
+    });
+    return rules;
+  };
+
+  const generateWorkersRanges = () => {
+    let ranges = '';
+    let workerCounter = 1;
     
-    // Insert 'main' if it's not present after the repo name
-    const parts = rawScriptLink.split('/');
-    const repoIndex = parts.findIndex(part => part === 'raw.githubusercontent.com') + 2;
-    if (parts[repoIndex] !== 'main') {
-      parts.splice(repoIndex, 0, 'main');
+    nodes.forEach((node, index) => {
+      if (node.name && node.workers > 0) {
+        const startWorker = workerCounter;
+        const endWorker = workerCounter + node.workers - 1;
+        
+        ranges += `# On Node ${index + 1}${index === 0 ? ' - Master' : ''}\n`;
+        ranges += '[cores]\n';
+        ranges += `start=${startWorker}\n`;
+        ranges += `end=${endWorker}\n\n`;
+        
+        workerCounter += node.workers;
+      }
+    });
+    
+    return ranges.trim();
+  };
+
+  const selectOutput = (ref, feedbackMessage) => {
+    if (ref.current) {
+      const range = document.createRange();
+      range.selectNodeContents(ref.current);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      setSelectFeedback(feedbackMessage);
+      setTimeout(() => setSelectFeedback(''), 3000);
     }
-    rawScriptLink = parts.join('/');
-  }
+  };
+
+  const resetForm = () => {
+    setNodeCount(1);
+    setNodes([{ name: '', workers: 1 }]);
+    setSelectFeedback('');
+    setUseDNS(false);
+    setSetupUFW(false);
+    setMasterIP('');
+  };
+
+  // Add these functions before the return statement
+  const saveCurrentConfig = () => {
+    if (!configName.trim()) {
+      alert('Please enter a name for this configuration');
+      return;
+    }
   
-  const scriptName = rawScriptLink.split('/').pop();
-  const folderPath = localFolder ? `~/${localFolder}` : '~';
-
-  let link = '';
-
-  if (accessToken) {
-    link += `TOKEN="${accessToken}"\n`;
-  }
-
-    if (runLocally) {
-      link += `mkdir -p ${folderPath} && \\\n`;
-
-      if (downloadTool === 'curl') {
-        if (accessToken) {
-          link += `curl -H "Authorization: token $TOKEN" -sSL "${rawScriptLink}" -o ${folderPath}/${scriptName} && \\\n`;
-        } else {
-          link += `curl -sSL "${rawScriptLink}" -o ${folderPath}/${scriptName} && \\\n`;
-        }
-      } else {
-        if (accessToken) {
-          link += `wget --header="Authorization: token $TOKEN" -O ${folderPath}/${scriptName} "${rawScriptLink}" && \\\n`;
-        } else {
-          link += `wget -O ${folderPath}/${scriptName} "${rawScriptLink}" && \\\n`;
-        }
-      }
-
-      link += `chmod +x ${folderPath}/${scriptName}`;
-
-      if (runImmediately) {
-        link += ` && \\\n${folderPath}/${scriptName}`;
-      }
-    } else {
-      if (downloadTool === 'curl') {
-        if (accessToken) {
-          link += `curl -H "Authorization: token $TOKEN" -sSL "${rawScriptLink}" | bash`;
-        } else {
-          link += `curl -sSL "${rawScriptLink}" | bash`;
-        }
-      } else {
-        if (accessToken) {
-          link += `wget -qO- --header="Authorization: token $TOKEN" "${rawScriptLink}" | bash`;
-        } else {
-          link += `wget -qO- "${rawScriptLink}" | bash`;
-        }
-      }
+    const currentConfig = {
+      nodeCount,
+      nodes,
+      useDNS,
+      setupUFW,
+      masterIP
+    };
+  
+    setSavedConfigs(prev => {
+      const updated = {
+        ...prev,
+        [configName]: currentConfig
+      };
+      localStorage.setItem('clusterConfigs', JSON.stringify(updated));
+      return updated;
+    });
+  
+    setConfigName('');
+  };
+  
+  const loadConfig = (name) => {
+    const config = savedConfigs[name];
+    if (config) {
+      setNodeCount(config.nodeCount);
+      setNodes(config.nodes);
+      setUseDNS(config.useDNS);
+      setSetupUFW(config.setupUFW);
+      setMasterIP(config.masterIP);
     }
-
-    setGeneratedLink(link);
   };
-
-  const handleReset = () => {
-    setAccessToken('');
-    setScriptLink('');
-    setLocalFolder('scripts');
-    setRunImmediately(true);
-    setRunLocally(true);
-    setGeneratedLink('');
-    setDownloadTool('curl');
-  };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(generatedLink).then(() => {
-      alert('Copied to clipboard!');
-    }, (err) => {
-      console.error('Could not copy text: ', err);
+  
+  const deleteConfig = (name) => {
+    setSavedConfigs(prev => {
+      const updated = { ...prev };
+      delete updated[name];
+      localStorage.setItem('clusterConfigs', JSON.stringify(updated));
+      return updated;
     });
   };
 
   return (
-    <div className="glg-container">
-      <div className="glg-main-container">
-        <h1 className="glg-heading">GitHub Link Generator</h1>
-        <div className="glg-input-group">
-          <label className="glg-label">Download Tool:</label>
-          <select
-            value={downloadTool}
-            onChange={(e) => setDownloadTool(e.target.value)}
-            className="glg-select"
-          >
-            <option value="curl">curl</option>
-            <option value="wget">wget</option>
-          </select>
-        </div>
-        <div className="glg-input-group">
-          <label className="glg-label">Access Token:</label>
+    <>
+      <div className="ccg-logo-container">
+        <a href="https://Quilibrium.one" target="_blank" rel="noopener noreferrer">
+          <img 
+            src="https://i.imgur.com/BAdpWCY.png" 
+            alt="Quilibrium Logo" 
+            className="ccg-logo"
+          />
+        </a>
+      </div>
+      
+      <div className="ccg-main-container">
+        <h1 className="ccg-heading">Cluster Config Generator</h1>
+        <div className="ccg-input-group">
+          <label className="ccg-label">Number of Nodes:</label>
           <input
-            type="password"
-            value={accessToken}
-            onChange={(e) => setAccessToken(e.target.value)}
-            className="glg-input"
-            placeholder="Enter your GitHub access token"
+            type="number"
+            min="1"
+            value={nodeCount}
+            onChange={handleNodeCountChange}
+            className="ccg-input short"
           />
         </div>
-        <div className="glg-input-group">
-          <label className="glg-label">GitHub Script Link:</label>
-          <input
-            type="text"
-            value={scriptLink}
-            onChange={(e) => setScriptLink(e.target.value)}
-            className="glg-input"
-            placeholder="e.g., user/repo/blob/main/script.sh"
-          />
-        </div>
-        <div className="glg-input-group">
-          <label className="glg-label">Local Folder:</label>
-          <input
-            type="text"
-            value={localFolder}
-            onChange={(e) => setLocalFolder(e.target.value)}
-            className="glg-input"
-            placeholder="Default: scripts"
-          />
-        </div>
-        <div className="glg-input-group">
-          <label className="glg-label">Run Immediately:</label>
+        <div className="ccg-input-group">
+          <label className="ccg-label">Use DNS:</label>
           <input
             type="checkbox"
-            checked={runImmediately}
-            onChange={(e) => setRunImmediately(e.target.checked)}
+            checked={useDNS}
+            onChange={(e) => setUseDNS(e.target.checked)}
           />
         </div>
-        {runImmediately && (
-          <div className="glg-input-group">
-            <label className="glg-label">Run Locally:</label>
+        <div className="ccg-input-group">
+          <label className="ccg-label">Setup UFW rules:</label>
+          <input
+            type="checkbox"
+            checked={setupUFW}
+            onChange={(e) => setSetupUFW(e.target.checked)}
+          />
+        </div>
+        {setupUFW && (
+          <div className="ccg-input-group">
+            <label className="ccg-label">Master Node IP:</label>
             <input
-              type="checkbox"
-              checked={runLocally}
-              onChange={(e) => setRunLocally(e.target.checked)}
+              type="text"
+              value={masterIP}
+              onChange={(e) => setMasterIP(e.target.value)}
+              className="ccg-input"
             />
           </div>
         )}
-        <div className="glg-button-group">
-          <button onClick={handleGenerate} className="glg-button glg-button-generate">Generate</button>
-          <button onClick={handleReset} className="glg-button glg-button-reset">Reset</button>
+        <div className="ccg-nodes-container">
+          {nodes.map((node, index) => (
+            <div key={index} className="ccg-node">
+              <div className="ccg-node-header">
+                Node {index + 1}{index === 0 ? ' - master' : ''}
+              </div>
+              <div className="ccg-input-group">
+                <label className="ccg-label">{useDNS ? "Node DNS:" : "Node IP:"}</label>
+                <input
+                  type="text"
+                  value={node.name}
+                  onChange={(e) => handleNodeChange(index, 'name', e.target.value)}
+                  className="ccg-input"
+                />
+              </div>
+              <div className="ccg-input-group">
+                <label className="ccg-label">Workers:</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={node.workers}
+                  onChange={(e) => handleNodeChange(index, 'workers', parseInt(e.target.value, 10))}
+                  className="ccg-input"
+                />
+              </div>
+            </div>
+          ))}
         </div>
-        {generatedLink && (
-          <div className="glg-output-container">
-            <h2 className="glg-subheading">Generated Link:</h2>
-            <pre className="glg-output">{generatedLink}</pre>
-            <button onClick={handleCopy} className="glg-button glg-button-copy">Copy</button>
+
+        {/* Save/Load Section */}
+
+        <div className="ccg-save-load-container">
+        <h3 className="ccg-configs-title">Your configurations</h3>
+            <div className="ccg-input-group">
+                <input
+                type="text"
+                value={configName}
+                onChange={(e) => setConfigName(e.target.value)}
+                placeholder="Configuration name"
+                className="ccg-input"
+                />
+                <button onClick={saveCurrentConfig} className="ccg-button ccg-button-select">
+                Save
+                </button>
+            </div>
+            <div className="ccg-saved-configs">
+                {Object.keys(savedConfigs).map(name => (
+                <div key={name} className="ccg-saved-config-item">
+                    <span
+                    onClick={() => loadConfig(name)}
+                    className="ccg-saved-config-name ccg-tooltip"
+                    data-tooltip="Load configuration"
+                    >
+                    {name}
+                    </span>
+                    <button
+                    onClick={() => deleteConfig(name)}
+                    className="ccg-delete-x ccg-tooltip"
+                    data-tooltip="Delete configuration"
+                    >
+                    ×
+                    </button>
+                </div>
+                ))}
+            </div>
+        </div>
+
+        <div className="ccg-config-container">
+          <div className="ccg-config-header">
+            <h2 className="ccg-subheading">Generated Config:</h2>
+            <div className="ccg-button-group">
+              <button onClick={() => selectOutput(configRef, 'Config output selected! Use Ctrl+C (Cmd+C on Mac) to copy.')} className="ccg-button ccg-button-select">Select Output</button>
+              <button onClick={resetForm} className="ccg-button ccg-button-reset">Reset</button>
+            </div>
+          </div>
+          {selectFeedback && <div className="ccg-feedback">{selectFeedback}</div>}
+          <pre ref={configRef} className="ccg-config">
+            {generateConfig()}
+          </pre>
+        </div>
+        {setupUFW && (
+          <div className="ccg-config-container">
+            <div className="ccg-config-header">
+              <h2 className="ccg-subheading">UFW Rules:</h2>
+              <div className="ccg-button-group">
+                <button onClick={() => selectOutput(ufwConfigRef, 'UFW rules selected! Use Ctrl+C (Cmd+C on Mac) to copy.')} className="ccg-button ccg-button-select">Select Output</button>
+              </div>
+            </div>
+            <pre ref={ufwConfigRef} className="ccg-config">
+              {generateUFWRules()}
+            </pre>
           </div>
         )}
+        
+        <div className="ccg-config-container">
+          <div className="ccg-config-header">
+            <h2 className="ccg-subheading">Workers Ranges:</h2>
+            <div className="ccg-button-group">
+              <button onClick={() => selectOutput(workersRangeRef, 'Workers ranges selected! Use Ctrl+C (Cmd+C on Mac) to copy.')} className="ccg-button ccg-button-select">Select Output</button>
+            </div>
+          </div>
+          <pre ref={workersRangeRef} className="ccg-config">
+            {generateWorkersRanges()}
+          </pre>
+        </div>
       </div>
-      <div className="glg-donation-container">
+      
+      <div className="ccg-donation-container">
         <a 
           href="https://iri.quest/q-donations" 
           target="_blank" 
           rel="noopener noreferrer"
-          className="glg-donation-link"
+          className="ccg-donation-link"
         >
-          <span className="glg-donation-icon">🧡</span>
+          <img 
+            src="https://s.w.org/images/core/emoji/15.0.3/svg/1f9e1.svg" 
+            alt="Orange Heart" 
+            className="ccg-donation-icon"
+          />
           Donations
         </a>
       </div>
-    </div>
+    </>
   );
 };
 
-// Add this at the bottom instead of export
-ReactDOM.render(<GitHubLinkGenerator />, document.getElementById('root'));
+// Render the component to the DOM
+ReactDOM.render(<ClusterConfigGenerator />, document.getElementById('root'));
+
     </script>
 </body>
 </html>
